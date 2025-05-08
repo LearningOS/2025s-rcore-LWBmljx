@@ -37,6 +37,7 @@ pub mod logging;
 pub mod sbi;
 pub mod sync;
 pub mod syscall;
+pub mod syscall_ids;
 pub mod task;
 pub mod timer;
 pub mod trap;

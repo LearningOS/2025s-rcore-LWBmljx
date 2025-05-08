@@ -17,6 +17,7 @@ mod task;
 use crate::config::MAX_APP_NUM;
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
+use crate::syscall_ids::{find_syscall_number, SYSCALL_COUNT};
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
@@ -54,7 +55,7 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
-            trace_times: 0,
+            trace_times: [0; SYSCALL_COUNT],
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -105,11 +106,18 @@ impl TaskManager {
         inner.tasks[current].task_status = TaskStatus::Exited;
     }
 
+    /// Increase the syscall trace time of current `Running` task.
+    pub fn increase_syscall_trace(&self, id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].trace_times[find_syscall_number(id)] += 1;
+    }
+
     /// Get the trace time of current `Running` task.
-    fn get_current_trace_time(&self) -> isize {
+    fn get_current_trace_time(&self, id: usize) -> isize {
         let inner = self.inner.exclusive_access();
         let current = inner.current_task;
-        inner.tasks[current].trace_times
+        inner.tasks[current].trace_times[find_syscall_number(id)]
     }
 
     /// Find next task to run and return task id.
@@ -178,7 +186,12 @@ pub fn exit_current_and_run_next() {
     run_next_task();
 }
 
+/// Increase the syscall trace time of current `Running` task.
+pub fn increase_syscall_trace(id: usize) {
+    TASK_MANAGER.increase_syscall_trace(id);
+}
+
 /// Get the trace time of current `Running` task.
-pub fn get_current_trace_time() -> isize {
-    TASK_MANAGER.get_current_trace_time()
+pub fn get_current_trace_time(id: usize) -> isize {
+    TASK_MANAGER.get_current_trace_time(id)
 }

@@ -43,10 +43,10 @@ pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
     match _trace_request {
         0 => unsafe { *(_id as *const u8) as isize },
         1 => unsafe {
-            *(_id as *mut u8) = *(_data as *const u8);
+            *(_id as *mut u8) = _data as u8;
             0
         },
-        2 => get_current_trace_time(),
+        2 => get_current_trace_time(_id),
         _ => -1,
     }
 }
