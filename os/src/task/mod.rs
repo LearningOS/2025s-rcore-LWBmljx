@@ -16,6 +16,7 @@ mod task;
 
 use crate::loader::{get_app_data, get_num_app};
 use crate::sync::UPSafeCell;
+use crate::syscall_ids::find_syscall_number;
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
 use lazy_static::*;
@@ -153,6 +154,20 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+    /// Increase the syscall trace time of current `Running` task.
+    pub fn increase_syscall_trace(&self, id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].trace_times[find_syscall_number(id)] += 1;
+    }
+
+    /// Get the trace time of current `Running` task.
+    fn get_current_trace_time(&self, id: usize) -> isize {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].trace_times[find_syscall_number(id)]
+    }
 }
 
 /// Run the first task in task list.
@@ -201,4 +216,14 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// Increase the syscall trace time of current `Running` task.
+pub fn increase_syscall_trace(id: usize) {
+    TASK_MANAGER.increase_syscall_trace(id);
+}
+
+/// Get the trace time of current `Running` task.
+pub fn get_current_trace_time(id: usize) -> isize {
+    TASK_MANAGER.get_current_trace_time(id)
 }

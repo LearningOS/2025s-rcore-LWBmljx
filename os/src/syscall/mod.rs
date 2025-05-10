@@ -9,30 +9,22 @@
 //! For clarity, each single syscall is implemented as its own function, named
 //! `sys_` then the name of the syscall. You can find functions like this in
 //! submodules, and you should also implement syscalls this way.
-const SYSCALL_WRITE: usize = 64;
-/// exit syscall
-const SYSCALL_EXIT: usize = 93;
-/// yield syscall
-const SYSCALL_YIELD: usize = 124;
-/// gettime syscall
-const SYSCALL_GET_TIME: usize = 169;
-/// sbrk syscall
-const SYSCALL_SBRK: usize = 214;
-/// munmap syscall
-const SYSCALL_MUNMAP: usize = 215;
-/// mmap syscall
-const SYSCALL_MMAP: usize = 222;
-/// trace syscall
-const SYSCALL_TRACE: usize = 410;
-
 mod fs;
 mod process;
 
+use crate::{
+    syscall_ids::{
+        SYSCALL_EXIT, SYSCALL_GET_TIME, SYSCALL_MMAP, SYSCALL_MUNMAP, SYSCALL_SBRK, SYSCALL_TRACE,
+        SYSCALL_WRITE, SYSCALL_YIELD,
+    },
+    task::increase_syscall_trace,
+};
 use fs::*;
 use process::*;
 
 /// handle syscall exception with `syscall_id` and other arguments
 pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
+    increase_syscall_trace(syscall_id);
     match syscall_id {
         SYSCALL_WRITE => sys_write(args[0], args[1] as *const u8, args[2]),
         SYSCALL_EXIT => sys_exit(args[0] as i32),
