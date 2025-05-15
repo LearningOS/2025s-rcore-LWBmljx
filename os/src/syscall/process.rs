@@ -2,10 +2,13 @@
 use core::{cmp::min, mem::size_of};
 
 use crate::{
-    mm::translated_byte_buffer,
+    mm::{
+        check_page_existence, check_page_prot, check_ptr_validity, get_unmap_frame_num,
+        translated_byte_buffer, VirtAddr,
+    },
     task::{
         change_program_brk, current_user_token, exit_current_and_run_next, get_current_trace_time,
-        suspend_current_and_run_next,
+        mmap, munmap, suspend_current_and_run_next,
     },
     timer::get_time_us,
 };
@@ -35,6 +38,11 @@ pub fn sys_yield() -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+    trace!("kernel: sys_get_time");
+    // check the address is valid
+    if !check_ptr_validity(_ts as usize) {
+        return -1;
+    }
     // get the time as usize
     let us = get_time_us();
     // build timeval
@@ -47,7 +55,7 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     let ts_bytes =
         unsafe { core::slice::from_raw_parts(&ts as *const TimeVal as *const u8, length) };
     // get buffer in the user space
-    let buffers = translated_byte_buffer(current_user_token(), _tz as *const u8, length);
+    let buffers = translated_byte_buffer(current_user_token(), _ts as *const u8, length);
     let mut u8_copied = 0;
     // copy data to user space
     for buffer in buffers {
@@ -58,7 +66,7 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     }
     // not all data copied, maybe the address is invalid
     if u8_copied != ts_bytes.len() {
-        trace!("kernel: sys_get_time: invalid address");
+        warn!("kernel: sys_get_time: invalid address");
         -1
     } else {
         0
@@ -68,8 +76,15 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 /// TODO: Finish sys_trace to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
 pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
+    trace!("kernel: sys_trace:{:?}, id:{:?}", _trace_request, _id);
     match _trace_request {
         0 => {
+            if !check_ptr_validity(_id)
+                || !check_page_prot(current_user_token(), VirtAddr::from(_id).floor(), 0b001)
+            {
+                warn!("kernel: sys_trace: invalid address");
+                return -1;
+            }
             // read memory from user space
             let buffer =
                 translated_byte_buffer(current_user_token(), _id as *const u8, size_of::<u8>());
@@ -79,24 +94,28 @@ pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
                 buffer[0][0] as isize
             // buffer is empty, maybe the address is invalid
             } else {
-                trace!("kernel: sys_trace: invalid address");
+                warn!("kernel: sys_trace: invalid address");
                 -1
             }
         }
         1 => {
+            if !check_ptr_validity(_id)
+                || !check_page_prot(current_user_token(), VirtAddr::from(_id).floor(), 0b010)
+            {
+                warn!("kernel: sys_trace: invalid address");
+                return -1;
+            }
             // get access of memory in user space
-            let src =
-                translated_byte_buffer(current_user_token(), _data as *const u8, size_of::<u8>());
-            let mut dst =
+            let mut buffer =
                 translated_byte_buffer(current_user_token(), _id as *const u8, size_of::<u8>());
             // copy data from src to dst
             // each [u8] in buffer should have at least one byte
-            if !src.is_empty() && !dst.is_empty() {
-                dst[0][0] = src[0][0];
+            if !buffer.is_empty() {
+                buffer[0][0] = _data as u8;
                 0
             // buffer is empty, maybe the address is invalid
             } else {
-                trace!("kernel: sys_trace: invalid address");
+                warn!("kernel: sys_trace: invalid address");
                 -1
             }
         }
@@ -106,15 +125,51 @@ pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
 }
 
 // YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
-    -1
+pub fn sys_mmap(_start: usize, _len: usize, _prot: usize) -> isize {
+    trace!("kernel: sys_mmap");
+    let start_va = VirtAddr(_start);
+    if !start_va.aligned() {
+        warn!(
+            "kernel: sys_mmap: invalid address, start{:?}, len{:?}",
+            _start, _len
+        );
+        return -1;
+    }
+    if _prot & !7 != 0 || _prot & 7 == 0 {
+        warn!("kernel: sys_mmap: invalid port");
+        return -1;
+    }
+    if _len == 0 {
+        return 0;
+    }
+    let end_va = VirtAddr(_start + _len);
+    let start_vpn = start_va.floor();
+    let end_vpn = end_va.ceil();
+    if get_unmap_frame_num() < end_vpn.0 - start_vpn.0 {
+        warn!("kernel: sys_mmap: not enough memory");
+        return -1;
+    };
+    if !check_page_existence(current_user_token(), start_vpn, end_vpn) {
+        warn!("kernel: sys_mmap: page already exists");
+        return -1;
+    }
+    mmap(start_va, end_va, _prot);
+    0
 }
 
 // YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
-    -1
+    trace!("kernel: sys_munmap");
+    let start_va = VirtAddr(_start);
+    if !start_va.aligned() {
+        warn!("kernel: sys_mmap: invalid address");
+        return -1;
+    }
+    if _len == 0 {
+        return 0;
+    }
+    let end_va = VirtAddr(_start + _len);
+    munmap(start_va, end_va)
 }
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {

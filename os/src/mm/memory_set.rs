@@ -63,6 +63,24 @@ impl MemorySet {
             None,
         );
     }
+    /// Assume each map area equal to
+    pub fn remove_framed_area(&mut self, start_va: VirtAddr, end_va: VirtAddr) -> isize {
+        if let Some(area) = self
+            .areas
+            .iter_mut()
+            .find(|area| area.vpn_range.get_start() == start_va.floor())
+        {
+            if end_va.ceil() != area.vpn_range.get_end() {
+                warn!("kernel: remove_framed_area: invalid end_va");
+                -1
+            } else {
+                area.unmap(&mut self.page_table);
+                0
+            }
+        } else {
+            -1
+        }
+    }
     fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
         map_area.map(&mut self.page_table);
         if let Some(data) = data {

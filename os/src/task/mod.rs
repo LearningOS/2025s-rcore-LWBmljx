@@ -15,6 +15,7 @@ mod switch;
 mod task;
 
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::{MapPermission, VirtAddr};
 use crate::sync::UPSafeCell;
 use crate::syscall_ids::find_syscall_number;
 use crate::trap::TrapContext;
@@ -156,7 +157,7 @@ impl TaskManager {
     }
 
     /// Increase the syscall trace time of current `Running` task.
-    pub fn increase_syscall_trace(&self, id: usize) {
+    fn increase_syscall_trace(&self, id: usize) {
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
         inner.tasks[current].trace_times[find_syscall_number(id)] += 1;
@@ -167,6 +168,34 @@ impl TaskManager {
         let inner = self.inner.exclusive_access();
         let current = inner.current_task;
         inner.tasks[current].trace_times[find_syscall_number(id)]
+    }
+
+    /// Map a virtual address range to a physical address range.
+    fn mmap(&self, start_va: VirtAddr, end_va: VirtAddr, prot: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let mut map_permission = MapPermission::U;
+        if prot & 1 == 1 {
+            map_permission |= MapPermission::R;
+        }
+        if prot & 2 == 2 {
+            map_permission |= MapPermission::W;
+        }
+        if prot & 4 == 4 {
+            map_permission |= MapPermission::X;
+        }
+        inner.tasks[current]
+            .memory_set
+            .insert_framed_area(start_va, end_va, map_permission);
+        0
+    }
+
+    fn munmap(&self, start_va: VirtAddr, end_va: VirtAddr) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current]
+            .memory_set
+            .remove_framed_area(start_va, end_va)
     }
 }
 
@@ -226,4 +255,15 @@ pub fn increase_syscall_trace(id: usize) {
 /// Get the trace time of current `Running` task.
 pub fn get_current_trace_time(id: usize) -> isize {
     TASK_MANAGER.get_current_trace_time(id)
+}
+
+/// Map a virtual address range to a physical address range.
+pub fn mmap(start_va: VirtAddr, end_va: VirtAddr, prot: usize) -> isize {
+    TASK_MANAGER.mmap(start_va, end_va, prot)
+}
+
+/// Unmap a virtual address range.
+/// According to the docunment, each unmap area should equal to each map area
+pub fn munmap(start_va: VirtAddr, end_va: VirtAddr) -> isize {
+    TASK_MANAGER.munmap(start_va, end_va)
 }

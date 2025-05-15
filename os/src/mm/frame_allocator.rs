@@ -112,6 +112,12 @@ pub fn frame_alloc() -> Option<FrameTracker> {
         .map(FrameTracker::new)
 }
 
+/// Get the number of unallocated physical page frames
+pub fn get_unmap_frame_num() -> usize {
+    let allocator = FRAME_ALLOCATOR.exclusive_access();
+    allocator.end - allocator.current + allocator.recycled.len()
+}
+
 /// Deallocate a physical page frame with a given ppn
 pub fn frame_dealloc(ppn: PhysPageNum) {
     FRAME_ALLOCATOR.exclusive_access().dealloc(ppn);

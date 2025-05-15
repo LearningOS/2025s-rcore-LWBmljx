@@ -271,3 +271,15 @@ where
 }
 /// a simple range structure for virtual page number
 pub type VPNRange = SimpleRange<VirtPageNum>;
+
+/// check whether a pointer is valid in sv39
+pub fn check_ptr_validity(ptr: usize) -> bool {
+    // read the highest bit
+    let bit38 = (ptr >> (VA_WIDTH_SV39 - 1)) & 1;
+    // check whether higher bit is the same as the highest bit
+    match bit38 {
+        0 => ptr >> VA_WIDTH_SV39 == 0,
+        1 => ptr >> VA_WIDTH_SV39 == (1 << VA_WIDTH_SV39) - 1,
+        _ => false,
+    }
+}

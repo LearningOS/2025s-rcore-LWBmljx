@@ -70,6 +70,10 @@ impl PageTableEntry {
     pub fn executable(&self) -> bool {
         (self.flags() & PTEFlags::X) != PTEFlags::empty()
     }
+    /// The page pointered by page table entry is user accessible?
+    pub fn user(&self) -> bool {
+        (self.flags() & PTEFlags::U) != PTEFlags::empty()
+    }
 }
 
 /// page table structure
@@ -116,7 +120,7 @@ impl PageTable {
         result
     }
     /// Find PageTableEntry by VirtPageNum
-    fn find_pte(&self, vpn: VirtPageNum) -> Option<&mut PageTableEntry> {
+    pub fn find_pte(&self, vpn: VirtPageNum) -> Option<&mut PageTableEntry> {
         let idxs = vpn.indexes();
         let mut ppn = self.root_ppn;
         let mut result: Option<&mut PageTableEntry> = None;
@@ -166,7 +170,16 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
     while start < end {
         let start_va = VirtAddr::from(start);
         let mut vpn = start_va.floor();
-        let ppn = page_table.translate(vpn).unwrap().ppn();
+        let ppn = match page_table.translate(vpn) {
+            Some(pte) => pte.ppn(),
+            None => {
+                warn!(
+                    "kernel: translated_byte_buffer: No PTE for VPN {:?} (from VA 0x{:x}). Original ptr: 0x{:x}, len: {}",
+                    vpn, start_va.0, ptr as usize, len
+                );
+                break; // Exit the while loop if no PTE is found
+            }
+        };
         vpn.step();
         let mut end_va: VirtAddr = vpn.into();
         end_va = end_va.min(VirtAddr::from(end));
@@ -178,4 +191,48 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
         start = end_va.into();
     }
     v
+}
+
+/// Check the permission of a page
+pub fn check_page_prot(token: usize, vpn: VirtPageNum, prot: usize) -> bool {
+    let page_table = PageTable::from_token(token);
+    let pte = page_table.translate(vpn);
+    match pte {
+        Some(pte) => {
+            let mut flags = PTEFlags::U;
+            if prot & 1 == 1 {
+                flags |= PTEFlags::R;
+            }
+            if prot & 2 == 2 {
+                flags |= PTEFlags::W;
+            }
+            if prot & 4 == 4 {
+                flags |= PTEFlags::X;
+            }
+            pte.flags().contains(flags)
+        }
+        None => false,
+    }
+}
+
+/// Check whether a page exists
+pub fn check_page_existence(token: usize, start_vpn: VirtPageNum, end_vpn: VirtPageNum) -> bool {
+    if start_vpn > end_vpn {
+        return false;
+    }
+    let mut vpn_now = start_vpn;
+    while vpn_now < end_vpn {
+        let page_table = PageTable::from_token(token);
+        if let Some(pte) = page_table.find_pte(vpn_now) {
+            if pte.is_valid() {
+                warn!(
+                    "page {:?} exist, start{:?}, end{:?}",
+                    vpn_now, start_vpn, end_vpn
+                );
+                return false;
+            }
+        }
+        vpn_now.step();
+    }
+    true
 }
